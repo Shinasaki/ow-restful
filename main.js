@@ -33,6 +33,7 @@ app.get('/bnet/user/login',
 app.get('/bnet/user/callback',
     passport.authenticate('bnet', { failureRedirect: '/' }),
     function(req, res){
+        res.send(req);
         res.redirect('/');
     });
 
