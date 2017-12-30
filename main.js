@@ -15,30 +15,29 @@ const app = express();
 const cors = require('cors')
 
 
+// SSL
 const privateKey = fs.readFileSync('../SSL/privkey.pem').toString();
 const certificate = fs.readFileSync('../SSL/fullchain.pem').toString();
 const credentials = {key: privateKey, cert: certificate};
+const httpServer = http.createServer(app);
+const httpsServer = https.createServer(credentials, app);
 
-
+// APP Setup
 app.use(passport.initialize());
 app.use(bodyParser.urlencoded({ extended: false }));
 app.use(bodyParser.json());
 app.use(cors())
 
+
+// Passport
 passport.serializeUser(function(user, done) {
     done(null, user);
 });
-  
-const httpServer = http.createServer(app);
-const httpsServer = https.createServer(credentials, app);
 
-// App setup
+// Passport bnet
 const BnetStrategy = require('passport-bnet').Strategy;
 const BNET_ID = '3pvwnysm268hq725f5pmgx5pwp5emwpk'
 const BNET_SECRET = 'N3XU7nXKhUEHkAhMCtdxAJTfKxe2CHbV'
- 
-
-// Use the BnetStrategy within Passport. 
 passport.use(new BnetStrategy({
     clientID: BNET_ID,
     clientSecret: BNET_SECRET,
@@ -53,15 +52,15 @@ const MongoClient = require('mongodb').MongoClient
 const dbUrl = "mongodb://localhost:27017"
 const ObjectId = require('mongodb').ObjectID;
 
+
+// Route
 app.get('/', function(req, res) {
     res.send('Welcome to grabkeys [Overwatch OAuth API]')
 })
 
-// Login
 app.get('/bnet/login',
     passport.authenticate('bnet'));
 
-// Callback
 app.get('/bnet/callback',
     passport.authenticate('bnet', { failureRedirect: '/' }),
     function(req, res){
@@ -75,23 +74,29 @@ app.get('/bnet/callback',
             method: 'GET',
         }
         Request(options, function (error, response, body) {
-
             // create profile object
             const data = { 
+                profile: {
+                    permission: 1
+                },
                 blizzard: {
                     userId : req.user.id,
                     tag : req.user.battletag,
-                    token : req.user.token
+                    token : req.user.token,
                 },
                 overwatch: JSON.parse(response.body)
             }
-
-            // update to db
             MongoClient.connect(dbUrl, function (err, db) {
                 const dbase = db.db('grabkeys-overwatch')
-                dbase.collection('users').update({ "blizzard.userId" : req.user.id } , data, {upsert: true})
-            })
-        })
+                dbase.collection('users').findOne({ "blizzard.userId" : req.user.id }, function(err, result) {
+                    if (result) {   // if not exist --> update token
+                        dbase.collection('users').update({ "blizzard.userId" : req.user.id },{ $set: { "blizzard.token" : req.user.token }});
+                    } else {    // if exist --> insert
+                        dbase.collection('users').insertOne(data);
+                    }
+                });
+            });
+        });
 
         // redirect
         res.redirect(env.main + '?token=' + req.user.token)
@@ -100,19 +105,23 @@ app.get('/bnet/callback',
 app.post('/bnet/get', function (req, res) {
     if (!req.body.token) { res.status(401); res.send('required token field'); } else {
         // find user
-        console.log(req.body)
         MongoClient.connect(dbUrl, function (err, db) {
             const dbase = db.db('grabkeys-overwatch')
-            console.log( req.body.token)
-            dbase.collection('users').find({ "blizzard.token" : req.body.token }).toArray(function (err, result) {
-                console.log(result)
+            dbase.collection('users').findOne({})
+            dbase.collection('users').findOne({ "blizzard.token" : req.body.token }, function (err, result) {
                 if (err) throw err;
-                if (typeof(result[0]) != 'undefined' && typeof(result[0]) != undefined) {
-                    console.log("'" + result[0].blizzard.tag + "' logged in with token '" + result[0].blizzard.token + "'.")
+                if (result) {
+                    console.log("'" + result.blizzard.tag + "' logged in with token '" + result.blizzard.token + "'.")
+                    res.status(200);
+                    res.send(result)
+                    db.close()
+                } else {
+                    // จริงๆคือบางครั้งเวลาของการ update และ find มันพร้อมกันเลยหาไม่เจอ
+                    console.log("token '" + req.body.token + "' does not match.")
+                    res.status(403);
+                    res.send("token does not match.")
+                    db.close()
                 }
-                res.status(200);
-                res.send(result[0])
-                db.close()
             })
         })
     }
