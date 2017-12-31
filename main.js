@@ -90,16 +90,22 @@ app.get('/bnet/callback',
                 const dbase = db.db('grabkeys-overwatch')
                 dbase.collection('users').findOne({ "blizzard.userId" : req.user.id }, function(err, result) {
                     if (result) {   // if not exist --> update token
-                        dbase.collection('users').update({ "blizzard.userId" : req.user.id },{ $set: { "blizzard.token" : req.user.token }});
+                        dbase.collection('users').update({ "blizzard.userId" : req.user.id },{ $set: { "blizzard.token" : req.user.token }}, function (err, result) {
+                            if (err) throw err;
+                            res.redirect(env.main + '?token=' + req.user.token)
+                            db.close() 
+                        });
                     } else {    // if exist --> insert
-                        dbase.collection('users').insertOne(data);
+                        dbase.collection('users').insertOne(data, function(err, result) {
+                            if (err) throw err;
+                            res.redirect(env.main + '?token=' + req.user.token)
+                            db.close()
+                        })
                     }
                 });
             });
         });
-
-        // redirect
-        res.redirect(env.main + '?token=' + req.user.token)
+        
 });
 
 app.post('/bnet/get', function (req, res) {
@@ -107,17 +113,19 @@ app.post('/bnet/get', function (req, res) {
         // find user
         MongoClient.connect(dbUrl, function (err, db) {
             const dbase = db.db('grabkeys-overwatch')
-            dbase.collection('users').findOne({})
+            // dbase.collection('users').find({}).toArray( function (err, result) {
+            //     console.log(result)
+            // })
             dbase.collection('users').findOne({ "blizzard.token" : req.body.token }, function (err, result) {
                 if (err) throw err;
                 if (result) {
-                    console.log("'" + result.blizzard.tag + "' logged in with token '" + result.blizzard.token + "'.")
+                    console.log("'" + result.blizzard.tag + "' access with token '" + result.blizzard.token + "'.")
                     res.status(200);
                     res.send(result)
                     db.close()
                 } else {
                     // จริงๆคือบางครั้งเวลาของการ update และ find มันพร้อมกันเลยหาไม่เจอ
-                    console.log("token '" + req.body.token + "' does not match.")
+                    console.log("'" + result.blizzard.tag + "' token '" + req.body.token + "' does not match.")
                     res.status(403);
                     res.send("token does not match.")
                     db.close()
@@ -126,6 +134,7 @@ app.post('/bnet/get', function (req, res) {
         })
     }
 })
+
 
 httpServer.listen(3030);
 httpsServer.listen(3443);
